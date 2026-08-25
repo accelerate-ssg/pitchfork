@@ -6,7 +6,52 @@ import ../../../values
 # a pattern written inline in a filter body is compiled and studied again
 # on every call — which for these two filters cost more than the match.
 let non_handle_chars = re"[^-\w]"
-let html_tag = re"<[^>]*>"
+# strip_html drops these wholesale, contents and all, before it gets to
+# loose tags: a <script> body is not text the reader was ever meant to see.
+let html_blocks = re"(?s)<script.*?</script>|<!--.*?-->|<style.*?</style>"
+let html_tag = re"(?s)<.*?>"
+
+proc opens_entity(s: string, i: int): bool =
+  ## True when s[i] == '&' starts a character reference — named ("&amp;")
+  ## or numeric ("&#39;"). escape_once leaves those alone, which is what
+  ## makes it idempotent over already-escaped markup.
+  var j = i + 1
+  if j < s.len and s[j] == '#':
+    inc j
+    let digits_start = j
+    while j < s.len and s[j] in Digits:
+      inc j
+    return j > digits_start and j < s.len and s[j] == ';'
+  let alpha_start = j
+  while j < s.len and s[j] in Letters:
+    inc j
+  result = j > alpha_start and j < s.len and s[j] == ';'
+
+proc is_base64(s: string, url_safe: bool): bool =
+  ## Reject what Ruby's Base64.strict_decode64 rejects. Nim's decoder is
+  ## lenient and happily returns garbage for a non-base64 string, but the
+  ## reference implementation raises — `{{ 5 | base64_decode }}` is an
+  ## error, not "5".
+  if s.len == 0:
+    return true
+  let alphabet = if url_safe: {'A'..'Z', 'a'..'z', '0'..'9', '-', '_', '+', '/'}
+                 else: {'A'..'Z', 'a'..'z', '0'..'9', '+', '/'}
+  var padding = 0
+  for i, c in s:
+    if c == '=':
+      inc padding
+      # Padding is at most two characters and only ever trails.
+      if padding > 2 or i < s.len - 2:
+        return false
+    elif padding > 0:
+      return false
+    elif c notin alphabet:
+      return false
+  # The URL-safe variant is routinely written without its padding.
+  if url_safe:
+    result = (s.len - padding) mod 4 != 1
+  else:
+    result = s.len mod 4 == 0
 
 
 # Appends a string to another string
@@ -16,33 +61,32 @@ create_filter:
     let suffixStr = to_string(suffix)
     result = VMValue(kind: vmString, stringVal: input & suffixStr)
 
-# Converts a string into a base64-decoded string
-create_filter:
-  proc base64_decode(value: VMValue): VMValue =
-    if value.kind != vmString:
-      return value
-    result = VMValue(kind: vmString, stringVal: value.stringVal.decode())
-
 # Converts a base64-encoded string into a string
 create_filter:
-  proc base64_encode(value: VMValue): VMValue =
-    if value.kind != vmString:
-      return value
-    result = VMValue(kind: vmString, stringVal: value.stringVal.encode())
+  proc base64_decode(value: VMValue): VMValue =
+    let input = to_string(value)
+    if not input.is_base64(url_safe = false):
+      raise newException(ValueError, "base64_decode filter: input is not valid base64")
+    result = VMValue(kind: vmString, stringVal: input.decode())
 
-# Converts a string into a URL-safe base64-decoded string
+# Converts a string into a base64-encoded string
 create_filter:
-  proc base64_url_safe_decode(value: VMValue): VMValue =
-    if value.kind != vmString:
-      return value
-    result = VMValue(kind: vmString, stringVal: value.stringVal.decode())
+  proc base64_encode(value: VMValue): VMValue =
+    result = VMValue(kind: vmString, stringVal: to_string(value).encode())
 
 # Converts a URL-safe base64-encoded string into a string
 create_filter:
+  proc base64_url_safe_decode(value: VMValue): VMValue =
+    let input = to_string(value)
+    if not input.is_base64(url_safe = true):
+      raise newException(ValueError,
+        "base64_url_safe_decode filter: input is not valid URL-safe base64")
+    result = VMValue(kind: vmString, stringVal: input.decode())
+
+# Converts a string into a URL-safe base64-encoded string
+create_filter:
   proc base64_url_safe_encode(value: VMValue): VMValue =
-    if value.kind != vmString:
-      return value
-    result = VMValue(kind: vmString, stringVal: value.stringVal.encode(safe = true))
+    result = VMValue(kind: vmString, stringVal: to_string(value).encode(safe = true))
 
 # Capitalizes the first word in a string and downcases the remaining characters
 create_filter:
@@ -242,11 +286,17 @@ create_filter:
 
 # Replaces the first occurrence of a substring with another string
 create_filter:
-  proc replace_first(value: VMValue, search: VMValue, replacement: VMValue): VMValue =
+  proc replace_first(value: VMValue, args: varargs[VMValue]): VMValue =
+    # Unlike replace_last, the replacement is optional and defaults to the
+    # empty string, so `replace_first: "ll"` deletes rather than raising.
+    if args.len < 1:
+      raise newException(ValueError, "replace_first filter requires at least 1 argument (search string)")
+    if args.len > 2:
+      raise newException(ValueError, "replace_first filter takes at most 2 arguments")
     if value.kind != vmString:
       return value
-    let searchStr = to_string(search)
-    let replacementStr = to_string(replacement)
+    let searchStr = to_string(args[0])
+    let replacementStr = if args.len >= 2: to_string(args[1]) else: ""
     let idx = value.stringVal.find(searchStr)
     var resultStr = value.stringVal
     if idx >= 0:
@@ -255,16 +305,18 @@ create_filter:
 
 # Strips HTML tags from a string
 create_filter:
-  proc strip_html(value: VMValue, args: varargs[VMValue]): VMValue =
+  proc strip_html(value: VMValue): VMValue =
     if value.kind != vmString:
       return value
-    # Simple HTML tag removal
-    let stripped = re.replace(value.stringVal, html_tag, "")
+    # Script, style and comment blocks go first, contents included; what is
+    # left of the markup is then reduced to its text by dropping the tags.
+    var stripped = re.replace(value.stringVal, html_blocks, "")
+    stripped = re.replace(stripped, html_tag, "")
     result = VMValue(kind: vmString, stringVal: stripped)
 
 # Strips newlines from a string
 create_filter:
-  proc strip_newlines(value: VMValue, args: varargs[VMValue]): VMValue =
+  proc strip_newlines(value: VMValue): VMValue =
     if value.kind != vmString:
       return value
     let stripped = value.stringVal.multiReplace([("\n", ""), ("\r", "")])
@@ -272,11 +324,26 @@ create_filter:
 
 # Converts newlines to HTML breaks
 create_filter:
-  proc newline_to_br(value: VMValue, args: varargs[VMValue]): VMValue =
+  proc newline_to_br(value: VMValue): VMValue =
     if value.kind != vmString:
       return value
-    let replaced = value.stringVal.replace("\n", "<br />")
-    result = VMValue(kind: vmString, stringVal: replaced)
+    let input = value.stringVal
+    # The <br /> is inserted before the newline, not instead of it: the
+    # source line structure survives into the HTML. A CRLF collapses to a
+    # single break, and a lone CR is left alone.
+    var res = newStringOfCap(input.len + 16)
+    var i = 0
+    while i < input.len:
+      if input[i] == '\r' and i + 1 < input.len and input[i + 1] == '\n':
+        res.add("<br />\n")
+        inc i, 2
+      elif input[i] == '\n':
+        res.add("<br />\n")
+        inc i
+      else:
+        res.add(input[i])
+        inc i
+    result = VMValue(kind: vmString, stringVal: res)
 
 # Removes the last occurrence of a substring from a string
 create_filter:
@@ -386,16 +453,27 @@ create_filter:
         let endIdx = min(actualStart + length, arr.len)
         result = VMValue(kind: vmArray, arrayVal: arr[actualStart..<endIdx])
 
-# HTML escapes a string, but only if it hasn't been escaped already  
+# HTML escapes a string, but only if it hasn't been escaped already
 create_filter:
-  proc escape_once(value: VMValue, args: varargs[VMValue]): VMValue =
+  proc escape_once(value: VMValue): VMValue =
     if value.kind != vmString:
       return value
-    var str = value.stringVal
-    # Only escape if not already escaped
-    if "&amp;" notin str and "&lt;" notin str and "&gt;" notin str and "&quot;" notin str:
-      str = xmltree.escape(str)
-    result = VMValue(kind: vmString, stringVal: str)
+    let input = value.stringVal
+    # The decision is per-character, not per-string: raw markup still gets
+    # escaped when an entity appears elsewhere in the same string. Only a
+    # '&' that already opens a character reference is passed through.
+    var escaped = newStringOfCap(input.len + 16)
+    for i, c in input:
+      case c
+      of '<': escaped.add("&lt;")
+      of '>': escaped.add("&gt;")
+      of '"': escaped.add("&quot;")
+      of '\'': escaped.add("&#39;")
+      of '&':
+        if input.opens_entity(i): escaped.add('&')
+        else: escaped.add("&amp;")
+      else: escaped.add(c)
+    result = VMValue(kind: vmString, stringVal: escaped)
 
 # Splits a string into an array using a delimiter
 create_filter:

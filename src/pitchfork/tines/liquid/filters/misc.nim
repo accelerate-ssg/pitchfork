@@ -86,29 +86,56 @@ create_filter:
     result = VMValue(kind: vmString, stringVal: inspected)
 
 
+# Everything outside this set is percent-encoded by url_encode; it is the
+# set Ruby's CGI.escape leaves untouched.
+const url_unreserved = {'A'..'Z', 'a'..'z', '0'..'9', '-', '_', '.', '~'}
+const upper_hex = "0123456789ABCDEF"
+
 # URL encodes a string
 create_filter:
-  proc url_encode(value: VMValue, args: varargs[VMValue]): VMValue =
+  proc url_encode(value: VMValue): VMValue =
     if value.kind != vmString:
       return value
-    var encoded = newStringOfCap(value.stringVal.len)
+    # Form encoding, not path encoding: a space becomes '+' and every other
+    # reserved byte becomes %XX. The old hand-picked list of five
+    # characters left '@', '!' and the rest of the reserved set standing.
+    var encoded = newStringOfCap(value.stringVal.len + 8)
     for c in value.stringVal:
-      case c
-      of ' ': encoded.add("%20")
-      of '&': encoded.add("%26")
-      of '=': encoded.add("%3D")
-      of '?': encoded.add("%3F")
-      of '#': encoded.add("%23")
-      else: encoded.add(c)
+      if c in url_unreserved:
+        encoded.add(c)
+      elif c == ' ':
+        encoded.add('+')
+      else:
+        encoded.add('%')
+        encoded.add(upper_hex[c.ord shr 4])
+        encoded.add(upper_hex[c.ord and 0x0F])
     result = VMValue(kind: vmString, stringVal: encoded)
 
 # URL decodes a string
 create_filter:
-  proc url_decode(value: VMValue, args: varargs[VMValue]): VMValue =
+  proc url_decode(value: VMValue): VMValue =
     if value.kind != vmString:
       return value
-    let decoded = value.stringVal.multiReplace(
-      ("%20", " "), ("%26", "&"), ("%3D", "="), ("%3F", "?"), ("%23", "#"))
+    let input = value.stringVal
+    var decoded = newStringOfCap(input.len)
+    var i = 0
+    while i < input.len:
+      case input[i]
+      of '+':
+        decoded.add(' ')
+        inc i
+      of '%':
+        # Lenient like CGI.unescape: a truncated or non-hex escape is left
+        # standing rather than raising.
+        if i + 2 < input.len and input[i + 1] in HexDigits and input[i + 2] in HexDigits:
+          decoded.add(chr(parseHexInt(input[i + 1 .. i + 2])))
+          inc i, 3
+        else:
+          decoded.add('%')
+          inc i
+      else:
+        decoded.add(input[i])
+        inc i
     result = VMValue(kind: vmString, stringVal: decoded)
 
 # Returns the type of the value as a string

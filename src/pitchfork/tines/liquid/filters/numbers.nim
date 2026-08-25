@@ -13,6 +13,104 @@ proc to_numeric(v: VMValue): float =
       0.0
   else: 0.0
 
+type Decimal = object
+  ## An exact base-10 value, mantissa * 10^-scale.
+  ##
+  ## Liquid's arithmetic filters run on Ruby BigDecimals built from each
+  ## operand's *text*, so 10.1 minus 2.2 is exactly 7.9 — not the
+  ## 7.899999999999999 that binary doubles land on. Doing the same in
+  ## scaled integers keeps our rendering identical to the reference.
+  mantissa: int64
+  scale: int   ## digits after the point
+  ok: bool     ## false when the value does not fit; caller falls back to float
+
+# Past this, an int64 mantissa risks overflow and a float mantissa stops
+# being exactly representable.
+const max_mantissa = 1'i64 shl 53
+const max_scale = 17
+
+proc decimal_from_text(s: string): Decimal =
+  ## Parse plain decimal notation. Exponent form and anything non-numeric
+  ## is refused rather than approximated.
+  var i = 0
+  var negative = false
+  if i < s.len and s[i] in {'-', '+'}:
+    negative = s[i] == '-'
+    inc i
+  var mantissa: int64 = 0
+  var scale = 0
+  var digits = 0
+  var seen_dot = false
+  while i < s.len:
+    let c = s[i]
+    if c == '.':
+      if seen_dot: return Decimal(ok: false)
+      seen_dot = true
+    elif c in Digits:
+      mantissa = mantissa * 10 + (c.ord - '0'.ord)
+      if mantissa >= max_mantissa: return Decimal(ok: false)
+      inc digits
+      if seen_dot: inc scale
+    else:
+      return Decimal(ok: false)
+    inc i
+  if digits == 0 or scale > max_scale: return Decimal(ok: false)
+  Decimal(mantissa: (if negative: -mantissa else: mantissa), scale: scale, ok: true)
+
+proc to_decimal(v: VMValue): Decimal =
+  case v.kind
+  of vmInt:
+    if abs(v.intVal) >= max_mantissa: Decimal(ok: false)
+    else: Decimal(mantissa: v.intVal, scale: 0, ok: true)
+  of vmFloat:
+    # From the rendered text, exactly as BigDecimal(float.to_s) does.
+    decimal_from_text(float_to_string(v.floatVal))
+  of vmString:
+    let parsed = decimal_from_text(v.stringVal.strip())
+    # A string that is not a number counts as zero, matching to_numeric.
+    if parsed.ok: parsed else: Decimal(mantissa: 0, scale: 0, ok: true)
+  of vmNull:
+    Decimal(mantissa: 0, scale: 0, ok: true)
+  else:
+    Decimal(ok: false)
+
+proc rescale(d: Decimal, scale: int): Decimal =
+  ## Restate d with more digits after the point.
+  var mantissa = d.mantissa
+  for _ in 0 ..< scale - d.scale:
+    if abs(mantissa) > max_mantissa div 10: return Decimal(ok: false)
+    mantissa *= 10
+  Decimal(mantissa: mantissa, scale: scale, ok: true)
+
+proc to_float(d: Decimal): float =
+  ## Exact numerator over an exact power of ten: one correctly rounded
+  ## division, so the result is the nearest double to the decimal value.
+  if d.scale == 0: d.mantissa.float
+  else: d.mantissa.float / pow(10.0, d.scale.float)
+
+proc decimal_op(a, b: VMValue, op: char): (float, bool) =
+  ## Add, subtract or multiply exactly in base 10. The bool is false when
+  ## the operands do not fit, leaving the caller on plain float maths.
+  let da = to_decimal(a)
+  let db = to_decimal(b)
+  if not da.ok or not db.ok: return (0.0, false)
+
+  if op == '*':
+    let scale = da.scale + db.scale
+    if scale > max_scale: return (0.0, false)
+    # Guard the product before forming it.
+    if da.mantissa != 0 and abs(db.mantissa) > max_mantissa div abs(da.mantissa):
+      return (0.0, false)
+    return (Decimal(mantissa: da.mantissa * db.mantissa, scale: scale, ok: true).to_float, true)
+
+  let scale = max(da.scale, db.scale)
+  let la = da.rescale(scale)
+  let lb = db.rescale(scale)
+  if not la.ok or not lb.ok: return (0.0, false)
+  let mantissa = if op == '+': la.mantissa + lb.mantissa else: la.mantissa - lb.mantissa
+  if abs(mantissa) >= max_mantissa: return (0.0, false)
+  (Decimal(mantissa: mantissa, scale: scale, ok: true).to_float, true)
+
 # Check if a value is integer-like (int, or string that parses as int without decimals)
 proc is_int_like(v: VMValue): bool =
   case v.kind
@@ -100,38 +198,44 @@ create_filter:
         let rounded = round(num * multiplier) / multiplier
         result = VMValue(kind: vmFloat, floatVal: rounded)
 
+proc arithmetic(value, operand: VMValue, op: char): VMValue =
+  ## Shared body of plus/minus/times. Two integers stay integers; anything
+  ## else goes through exact base-10 arithmetic, falling back to doubles
+  ## only for magnitudes a scaled int64 cannot hold.
+  let a = to_numeric(value)
+  let b = to_numeric(operand)
+
+  if is_int_like(value) and is_int_like(operand):
+    let n = case op
+            of '+': a.int64 + b.int64
+            of '-': a.int64 - b.int64
+            else: a.int64 * b.int64
+    return VMValue(kind: vmInt, intVal: n)
+
+  let (exact, fitted) = decimal_op(value, operand, op)
+  if fitted:
+    return VMValue(kind: vmFloat, floatVal: exact)
+
+  let n = case op
+          of '+': a + b
+          of '-': a - b
+          else: a * b
+  VMValue(kind: vmFloat, floatVal: n)
+
 # Adds a number to another number
 create_filter:
   proc plus(value: VMValue, addend: VMValue): VMValue =
-    let a = to_numeric(value)
-    let b = to_numeric(addend)
-
-    if is_int_like(value) and is_int_like(addend):
-      result = VMValue(kind: vmInt, intVal: a.int64 + b.int64)
-    else:
-      result = VMValue(kind: vmFloat, floatVal: a + b)
+    arithmetic(value, addend, '+')
 
 # Subtracts a number from another number
 create_filter:
   proc minus(value: VMValue, subtrahend: VMValue): VMValue =
-    let a = to_numeric(value)
-    let b = to_numeric(subtrahend)
-
-    if is_int_like(value) and is_int_like(subtrahend):
-      result = VMValue(kind: vmInt, intVal: a.int64 - b.int64)
-    else:
-      result = VMValue(kind: vmFloat, floatVal: a - b)
+    arithmetic(value, subtrahend, '-')
 
 # Multiplies a number by another number
 create_filter:
   proc times(value: VMValue, multiplier: VMValue): VMValue =
-    let a = to_numeric(value)
-    let b = to_numeric(multiplier)
-
-    if is_int_like(value) and is_int_like(multiplier):
-      result = VMValue(kind: vmInt, intVal: a.int64 * b.int64)
-    else:
-      result = VMValue(kind: vmFloat, floatVal: a * b)
+    arithmetic(value, multiplier, '*')
 
 # Divides a number by another number
 create_filter:
@@ -166,24 +270,28 @@ create_filter:
     else:
       result = VMValue(kind: vmFloat, floatVal: a.mod(b))
 
+# Coerce to the number the comparison actually used, so the winning side is
+# returned as a number rather than as whatever it came in as. Handing back
+# the raw value let `-1 | at_least: "abc"` render "abc" and
+# `nosuchthing | at_most: 5` render nothing, where both should be 0.
+proc to_number(v: VMValue): VMValue =
+  if is_int_like(v):
+    VMValue(kind: vmInt, intVal: to_numeric(v).int64)
+  else:
+    VMValue(kind: vmFloat, floatVal: to_numeric(v))
+
 # Limits a number to a minimum value
 create_filter:
   proc at_least(value: VMValue, minVal: VMValue): VMValue =
-    let val = to_numeric(value)
-    let minValue = to_numeric(minVal)
-
-    if val < minValue:
-      result = minVal
+    if to_numeric(value) < to_numeric(minVal):
+      result = to_number(minVal)
     else:
-      result = value
+      result = to_number(value)
 
 # Limits a number to a maximum value
 create_filter:
   proc at_most(value: VMValue, maxVal: VMValue): VMValue =
-    let val = to_numeric(value)
-    let maxValue = to_numeric(maxVal)
-
-    if val > maxValue:
-      result = maxVal
+    if to_numeric(value) > to_numeric(maxVal):
+      result = to_number(maxVal)
     else:
-      result = value
+      result = to_number(value)

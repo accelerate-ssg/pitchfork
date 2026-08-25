@@ -32,3 +32,7 @@ src/liquid_lib
 src/mustache_lib
 src/handlebars_lib
 src/liquid_c
+
+# Compiled tine module binaries (the isMainModule baseline suites)
+src/pitchfork/tines/liquid/compiler
+src/pitchfork/tines/liquid/lexer/classify_identifier

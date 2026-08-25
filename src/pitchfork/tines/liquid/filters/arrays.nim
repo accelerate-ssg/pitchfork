@@ -1,6 +1,20 @@
 import sequtils, algorithm, strutils, tables
 import ../../../values
 
+proc natural_key*(v: VMValue): string =
+  ## Comparison text for sort_natural. Same as rendering except for
+  ## objects: rendering collapses every object to "{}", which would make
+  ## them all compare equal, so spell out the pairs the way the reference
+  ## implementation's Hash#to_s does.
+  if v.kind != vmObject:
+    return to_string(v)
+  var pairs: seq[string] = @[]
+  for key, item in v.objectVal:
+    let rendered = if item.kind == vmString: "\"" & item.stringVal & "\""
+                   else: to_string(item)
+    pairs.add("\"" & key & "\"=>" & rendered)
+  result = "{" & pairs.join(", ") & "}"
+
 
 # Returns the first element of an array or first key-value pair of an object
 create_filter:
@@ -439,16 +453,33 @@ create_filter:
 # Sorts an array using natural sort order
 create_filter:
   proc sort_natural(value: VMValue, args: varargs[VMValue]): VMValue =
+    if args.len > 1:
+      raise newException(ValueError, "sort_natural filter takes at most 1 argument")
     if value.kind != vmArray:
       return value
-    
-    # For simplicity, this is the same as regular sort for now
-    # A proper natural sort would handle numbers within strings differently
+
+    # A property argument sorts by that key; without one — including when
+    # the argument is an undefined variable — the elements compare on their
+    # own text. Either way the comparison ignores case and puts nils last.
+    let propName = if args.len > 0 and args[0].kind == vmString: args[0].stringVal else: ""
+
+    proc sortKey(v: VMValue): VMValue =
+      if propName.len == 0:
+        return v
+      if v.kind == vmObject and propName in v.objectVal:
+        return v.objectVal[propName]
+      VMValue(kind: vmNull)
+
     var sorted = value.arrayVal
     sorted.sort(proc(a, b: VMValue): int =
-      return cmp(to_string(a).toLower(), to_string(b).toLower())
+      let aKey = sortKey(a)
+      let bKey = sortKey(b)
+      if aKey.kind == vmNull and bKey.kind == vmNull: return 0
+      if aKey.kind == vmNull: return 1
+      if bKey.kind == vmNull: return -1
+      cmpIgnoreCase(natural_key(aKey), natural_key(bKey))
     )
-    
+
     result = VMValue(kind: vmArray, arrayVal: sorted)
 
 # Sums all numeric values in an array
