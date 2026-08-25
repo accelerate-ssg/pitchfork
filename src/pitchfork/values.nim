@@ -12,17 +12,17 @@ proc register_filter*(name: string, handler: Filter) =
   filters[name] = handler
 
 proc float_to_string*(f: float64): string =
-  ## Format a float like Ruby: strip trailing zeros but keep at least one decimal
-  result = formatFloat(f, ffDecimal, 10)
-  # Strip trailing zeros after decimal point
-  var i = result.len - 1
-  while i > 0 and result[i] == '0':
-    dec i
-  if i > 0 and result[i] == '.':
-    inc i  # Keep at least "X.0"
-  # Truncating in place; slicing would allocate a second string and copy
-  # the kept prefix into it.
-  result.setLen(i + 1)
+  ## Format a float like Ruby's Float#to_s: the shortest text that reads
+  ## back as the same double, always carrying a decimal point. Nim's `$`
+  ## already does both; only the exponent form differs, where Nim writes
+  ## "1e+20" for Ruby's "1.0e+20".
+  ##
+  ## Fixing the fraction at 10 digits, as this used to, silently truncated
+  ## anything longer: 20 | divided_by: 7.0 rendered "2.8571428571".
+  result = $f
+  let e = result.find('e')
+  if e > 0 and result.find('.', 0, e - 1) < 0:
+    result.insert(".0", e)
 
 proc add_to_string*(dest: var string, v: VMValue) =
   ## Append a value's rendering to dest. This is the primitive; to_string
