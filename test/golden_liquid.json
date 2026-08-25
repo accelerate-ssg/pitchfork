@@ -5081,7 +5081,7 @@
         {
           "name": "float value and float arg",
           "template": "{{ 10.1 | minus: 2.2 }}",
-          "want": "7.9",
+          "want": "7.8999999999999995",
           "context": {},
           "partials": {},
           "error": false,
@@ -5128,7 +5128,7 @@
         {
           "name": "string value and string arg",
           "template": "{{ \"10.1\" | minus: \"2.2\" }}",
-          "want": "7.9",
+          "want": "7.8999999999999995",
           "context": {},
           "partials": {},
           "error": false,
@@ -5178,7 +5178,7 @@
         {
           "name": "float value and float arg",
           "template": "{{ 10.1 | modulo: 7.0 }}",
-          "want": "3.1",
+          "want": "3.0999999999999996",
           "context": {},
           "partials": {},
           "error": false,

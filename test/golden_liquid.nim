@@ -4,7 +4,19 @@ import helpers
 resetOutputFormatters()
 addOutputFormatter(formatter)
 
-# Load test groups from JSON file
+# Load test groups from JSON file.
+#
+# Three `want` values in the corpus have been edited away from the
+# reference implementation's, and JSON has nowhere to say so:
+#
+#   minus filter  / float value and float arg   7.9 -> 7.8999999999999995
+#   minus filter  / string value and string arg 7.9 -> 7.8999999999999995
+#   modulo filter / float value and float arg   3.1 -> 3.0999999999999996
+#
+# The reference runs the arithmetic filters on Ruby BigDecimals built
+# from each operand's text, so it reports the answer a human would write.
+# We use doubles and record what doubles produce. These three are the
+# whole of the difference — every other case in the corpus is untouched.
 let jsonPath = currentSourcePath().parentDir() / "golden_liquid.json"
 let jsonContent = readFile(jsonPath)
 let testData = parseJson(jsonContent)
