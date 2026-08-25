@@ -126,7 +126,41 @@ template skip_whitespace(input: string, pos: var int) =
   while pos < input.len and input[pos] in {' ', '\t', '\r', '\n'}:
     inc pos
 
-proc lex_liquid_block(input: string, startPos: int): tuple[sections: seq[Section], endPos: int] =
+proc validate_liquid_block(input: string, sections: seq[Section]) =
+  ## A liquid tag's body is its own block body: it may not close a block
+  ## opened outside the tag, and whatever it opens it must also close.
+  ## Without this an `endif` inside a liquid tag silently closed an `if`
+  ## from the surrounding template.
+  const openers = {tkIf, tkUnless, tkFor, tkCase, tkCapture}
+  const closers = {tkEndif, tkEndunless, tkEndfor, tkEndcase, tkEndcapture,
+                   tkEndtablerow, tkEndifchanged}
+  var depth = 0
+  for section in sections:
+    if section.kind != skTag or section.tokens.len == 0:
+      continue
+    let first = section.tokens[0]
+    if first.kind in openers:
+      inc depth
+    elif first.kind in closers:
+      dec depth
+    elif first.kind == tkIdentifier:
+      # These block tags have no keyword token of their own. comment and
+      # raw are only recognised by the outer lexer, so inside a liquid
+      # body they arrive here as plain identifiers.
+      let name = input[first.start ..< first.stop]
+      if name in ["tablerow", "ifchanged", "comment", "raw"]:
+        inc depth
+      elif name.len > 3 and name[0 .. 2] == "end":
+        dec depth
+    if depth < 0:
+      raise newException(ValueError,
+        "liquid tag cannot close a block it did not open")
+  if depth != 0:
+    raise newException(ValueError,
+      "block opened inside a liquid tag was never closed")
+
+proc lex_liquid_block(input: string, startPos: int):
+    tuple[sections: seq[Section], endPos: int, stripRight: bool] =
   ## Parses a `{% liquid %}` block where each line is an implicit Liquid tag.
   ##
   ## The liquid tag allows writing multiple Liquid statements without tag delimiters.
@@ -239,75 +273,87 @@ proc lex_liquid_block(input: string, startPos: int): tuple[sections: seq[Section
   ## - The closing `%}` can appear on the same line as content or standalone
   var pos = startPos
   result.sections = @[]
-  
-  # Now process line by line until we hit %}
+
   while pos < input.len:
-    # Skip leading whitespace on each line
-    input.skip_whitespace(pos)
-    
-    # Check if we hit the end - look for standalone %}
-    if input.matches_at(pos, "%}"):
-      pos += 2
-      result.endPos = pos
+    # Statements are separated by line breaks, and blank lines mean
+    # nothing, so leading whitespace of any kind is skipped wholesale.
+    while pos < input.len and input[pos] in {' ', '\t', '\r', '\n'}:
+      inc pos
+    if pos >= input.len:
+      break
+
+    # The tag ends here, with or without whitespace control.
+    if input.matches_at(pos, "-%}"):
+      result.stripRight = true
+      result.endPos = pos + 3
       return
-    
-    # Skip comment lines (starting with #)
-    if input.matches_at(pos, '#'):
-      # Skip to end of line
-      while not input.matches_at(pos, '\n'):
+    if input.matches_at(pos, "%}"):
+      result.endPos = pos + 2
+      return
+
+    # A comment statement runs to the end of its line — but never past the
+    # closing delimiter, or `{% liquid # note %}` would swallow the rest
+    # of the template.
+    if input[pos] == '#':
+      while pos < input.len and input[pos] notin {'\n', '\r'} and
+            not input.matches_at(pos, "%}") and not input.matches_at(pos, "-%}"):
         inc pos
-      if pos < input.len:
-        inc pos  # Skip the newline
       continue
-    
-    # Parse a line as if it were a tag
+
+    # `liquid` is a no-op statement inside a liquid tag, so a body may
+    # repeat the keyword: `{% liquid liquid echo "x" %}`.
+    if input.matches_at(pos, "liquid") and
+        (pos + 6 >= input.len or input[pos + 6] in {' ', '\t', '\r', '\n', '%', '-'}):
+      pos += 6
+      continue
+
     let lineStart = pos
-      
-    if input.matches_at(pos, "echo"):
-      # It's an echo statement - treat as output section
+
+    # `echo` produces output; every other statement is an ordinary tag.
+    let isEcho = input.matches_at(pos, "echo") and
+        (pos + 4 >= input.len or input[pos + 4] in {' ', '\t', '\r', '\n', '%', '-'})
+    if isEcho:
       pos += 4
 
-      var section = Section(kind: skOutput, start: lineStart)
-      section.tokens = newSeqOfCap[Token](5)
-      
-      while not input.matches_at(pos, '\n'):
-        # Skip whitespace
-        while input.matches_at(pos, ' ') or input.matches_at(pos, '\t'):
+    var section = Section(kind: if isEcho: skOutput else: skTag, start: lineStart)
+    section.tokens = newSeqOfCap[Token](if isEcho: 5 else: 10)
+
+    # Consume the rest of the statement. Unlike the surrounding lexer this
+    # stops at a line break as well as at the delimiter: the newline is
+    # what separates one statement from the next.
+    while pos < input.len:
+      while pos < input.len and input[pos] in {' ', '\t'}:
+        inc pos
+      if pos >= input.len:
+        break
+      # Only a newline separates statements. A lone carriage return does
+      # not, so a CR-terminated body is one long malformed statement —
+      # which is exactly what the reference implementation rejects.
+      if input[pos] == '\n' or
+          (input[pos] == '\r' and pos + 1 < input.len and input[pos + 1] == '\n'):
+        break
+      if input.matches_at(pos, "-%}") or input.matches_at(pos, "%}"):
+        break
+      if input[pos] == '#':
+        # Trailing comment on a statement line.
+        while pos < input.len and input[pos] notin {'\n', '\r'} and
+              not input.matches_at(pos, "%}") and not input.matches_at(pos, "-%}"):
           inc pos
-        
-        # Parse tokens (same as output section)
-        input.parse_token(pos, input.len, section)
-      
-      section.stop = pos;
+        break
+      let tokenStart = pos
+      input.parse_token(pos, input.len, section)
+      # parse_token leaves pos alone on a character it does not know; step
+      # over it rather than spinning on it forever.
+      if pos == tokenStart:
+        inc pos
+
+    section.stop = pos
+    if section.tokens.len > 0:
       result.sections.add(section)
-    else:
-      # Regular tag line
-      var section = Section(kind: skTag, start: lineStart)
-      section.tokens = newSeqOfCap[Token](10)
-      
-      # Parse the line as tag content (reuse existing token parsing logic)
-      var linePos = pos
-      while not input.matches_at(pos, '\n'):
-        # Skip whitespace
-        while input.matches_at(pos, ' ') or input.matches_at(pos, '\t'):
-          inc pos
-        
-        # Check for inline comment
-        if input[linePos] == '#':
-          while  not input.matches_at(pos, '\n'):
-            inc pos
-        
-        input.parse_token(pos, input.len, section)
-      
-      section.stop = pos
-      if section.tokens.len > 0:
-        result.sections.add(section)
-    
-    # Move to next line
-    if pos < input.len and input[pos] == '\n':
-      inc pos
-  
-  result.endPos = pos - 1
+
+  # Unterminated: consume the rest of the input rather than handing back a
+  # position the caller would loop on.
+  result.endPos = input.len
 
 
 
@@ -444,6 +490,10 @@ proc lex*(input: string): seq[Section] =
         #      `bm                                                                                                                                                                                               md'    
         profile("inline comment"):
           inc pos  # Skip the #
+          # Once the comment spans lines, every further line has to open
+          # with its own '#'; a bare continuation line is an error rather
+          # than more comment text.
+          var lineNeedsHash = false
           while pos < input.len - 1:
             if input.matches_at(pos, "%}"):
               pos += 1
@@ -451,6 +501,14 @@ proc lex*(input: string): seq[Section] =
             if input.matches_at(pos, "-%}"):
               pos += 2
               break
+
+            if input[pos] == '\n':
+              lineNeedsHash = true
+            elif lineNeedsHash and input[pos] notin {' ', '\t', '\r'}:
+              if input[pos] != '#':
+                raise newException(ValueError,
+                  "inline comment tag: every line must start with '#'")
+              lineNeedsHash = false
 
             inc pos
           # Continue to next iteration - inline comments produce no output
@@ -562,7 +620,8 @@ proc lex*(input: string): seq[Section] =
                              stripLeft: stripLeft, stripRight: endrawStripRight)
             result.add(section)
       
-      elif input.matches_at(pos, "liquid"):
+      elif input.matches_at(pos, "liquid") and
+          (pos + 6 >= input.len or input[pos + 6] in {' ', '\t', '\r', '\n', '-', '%'}):
         #      ,pm                       ,,    ,,                           ,,         ,,                      mq.    
         #     6M   ,M""Yg.    ,M'      `7MM    db                           db       `7MM      ,M""Yg.    ,M'    Mb   
         #     MM   MY   Mb  ,M'          MM                                            MM      MY   Mb  ,M'      MM   
@@ -574,7 +633,19 @@ proc lex*(input: string): seq[Section] =
         #     YM                                          MM                                                     M9   
         #      `bm                                      .JMML.                                                 md'    
         profile("liquid tag"):
-          let (liquidSections, newPos) = lex_liquid_block(input, pos + 6)
+          var (liquidSections, newPos, blockStripRight) = lex_liquid_block(input, pos + 6)
+          validate_liquid_block(input, liquidSections)
+          # Whitespace control belongs to the tag as a whole, but sections
+          # are what carry it: the first statement takes the opening {%-
+          # and the last takes the closing -%}. A body of nothing but
+          # comments produces no statements, so an empty text section
+          # stands in to keep trimming the text around the tag.
+          if liquidSections.len == 0:
+            liquidSections.add(Section(kind: skText, start: tagStart, stop: tagStart,
+                                       stripLeft: stripLeft, stripRight: blockStripRight))
+          else:
+            liquidSections[0].stripLeft = stripLeft
+            liquidSections[^1].stripRight = blockStripRight
           result.add(liquidSections)
           pos = newPos
       
@@ -879,6 +950,15 @@ when isMainModule:
       check sections[0].kind == skTag
       check sections[0].tokens.len == 4  # assign, x, =, 5 (no comment)
 
+    test "Inline comment over multiple lines":
+      let input = "{%-\n  # spread inline comments\n  # over multiple lines\n-%}"
+      check lex(input).len == 0
+
+    test "Inline comment continuation lines must each start with a hash":
+      let input = "{%-\n  # spread inline comments\n  over multiple lines\n-%}"
+      expect ValueError:
+        discard lex(input)
+
     test "Comment block":
       let input = "{% comment %}This is ignored{% endcomment %}"
       let sections = lex(input)
@@ -919,6 +999,99 @@ when isMainModule:
       check sections.len == 1
       check sections[0].kind == skOutput  # Should be output, not tag
       check sections[0].tokens.len == 3  # product, dot, price
+
+  suite "Liquid tag handling":
+    test "One statement per line":
+      let input = "{% liquid\n  assign a = 1\n  echo a\n%}"
+      let sections = lex(input)
+      check sections.len == 2
+      check sections[0].kind == skTag
+      check sections[0].tokens[0].kind == tkAssignTag
+      check sections[1].kind == skOutput  # echo becomes output
+      check sections[1].tokens.len == 1
+
+    test "Statements may share the opening line":
+      let input = "{% liquid echo 'a' %}"
+      let sections = lex(input)
+      check sections.len == 1
+      check sections[0].kind == skOutput
+
+    test "Comment lines produce no section":
+      let input = "{% liquid\n  # a note\n  echo 'a'\n%}"
+      let sections = lex(input)
+      check sections.len == 1
+      check sections[0].kind == skOutput
+
+    test "A comment does not run past the closing delimiter":
+      let input = "{% liquid # a note %}after"
+      let sections = lex(input)
+      check sections.len == 2
+      check sections[1].kind == skText
+      check input[sections[1].start..<sections[1].stop] == "after"
+
+    test "Whitespace control lands on the first and last statement":
+      let input = "{%- liquid\n  echo 'a'\n  echo 'b'\n-%}"
+      let sections = lex(input)
+      check sections.len == 2
+      check sections[0].stripLeft == true
+      check sections[0].stripRight == false
+      check sections[1].stripLeft == false
+      check sections[1].stripRight == true
+
+    test "A body of only comments still carries whitespace control":
+      let input = "{%- liquid\n  # nothing but a note\n-%}"
+      let sections = lex(input)
+      check sections.len == 1
+      check sections[0].kind == skText
+      check sections[0].start == sections[0].stop  # emits no text
+      check sections[0].stripLeft == true
+      check sections[0].stripRight == true
+
+    test "A repeated liquid keyword is a no-op":
+      let input = "{%- liquid liquid liquid echo \"foo\" -%}"
+      let sections = lex(input)
+      check sections.len == 1
+      check sections[0].kind == skOutput
+      check sections[0].stripLeft == true
+      check sections[0].stripRight == true
+
+    test "CRLF separates statements":
+      let input = "{% liquid\r\n  echo 'a'\r\n  echo 'b'\r\n%}"
+      let sections = lex(input)
+      check sections.len == 2
+      check sections.allIt(it.kind == skOutput)
+
+    test "A lone carriage return does not separate statements":
+      # The whole body reads as one malformed statement, which opens an
+      # `if` that is never closed.
+      let input = "{% liquid\rif a\r  echo a\rendif\r%}"
+      expect ValueError:
+        discard lex(input)
+
+    test "Cannot close a block it did not open":
+      expect ValueError:
+        discard lex("{% if true %}42{% liquid endif %}")
+
+    test "Cannot leave a block it opened unclosed":
+      expect ValueError:
+        discard lex("{% liquid if true\n  echo 'a'\n%}")
+
+    test "A comment block inside the body stays balanced":
+      let input = "{% liquid\ncomment a note\nendcomment\n%}"
+      check lex(input).len == 2  # comment + endcomment, both inert tags
+
+    test "An unterminated block consumes the rest of the input":
+      let input = "{% liquid\n  echo 'a'"
+      let sections = lex(input)
+      check sections.len == 1
+      check sections[0].kind == skOutput
+
+    test "A tag merely starting with 'liquid' is not a liquid tag":
+      let input = "{% liquidate 5 %}"
+      let sections = lex(input)
+      check sections.len == 1
+      check sections[0].kind == skTag
+      check sections[0].tokens[0].kind == tkIdentifier
 
   suite "Whitespace control":
     test "Strip left in tag":

@@ -14,9 +14,7 @@ let testData = parseJson(jsonContent)
 # silently vanish from the totals. Entries are the normalized suite name, i.e.
 # the group name with the "liquid.golden." prefix dropped and underscores
 # turned into spaces.
-let skippedSuites = [
-  "inline comment tag",
-].toHashSet()
+let skippedSuites = initHashSet[string]()
 
 var seenSuites = initHashSet[string]()
 var skippedCases = 0
