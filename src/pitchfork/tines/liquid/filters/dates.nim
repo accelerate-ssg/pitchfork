@@ -147,8 +147,11 @@ create_filter:
     else:
       "%Y-%m-%d %H:%M:%S"
     
-    let now = now()
-    result = VMValue(kind: vmString, stringVal: now.format(format))
+    # Through liquid_date_format, not DateTime.format: the argument is a
+    # strftime pattern like the `date` filter takes, and Nim's own format
+    # raises on the '%' rather than reading it. That made every call to
+    # this filter throw, the default format included.
+    result = VMValue(kind: vmString, stringVal: liquid_date_format(now(), format))
 
 # Adds time to a date
 create_filter:
