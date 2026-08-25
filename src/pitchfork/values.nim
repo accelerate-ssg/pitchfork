@@ -13,13 +13,21 @@ proc register_filter*(name: string, handler: Filter) =
 
 proc float_to_string*(f: float64): string =
   ## Format a float like Ruby's Float#to_s: the shortest text that reads
-  ## back as the same double, always carrying a decimal point. Nim's `$`
-  ## already does both; only the exponent form differs, where Nim writes
-  ## "1e+20" for Ruby's "1.0e+20".
+  ## back as the same double, always carrying a decimal point.
   ##
   ## Fixing the fraction at 10 digits, as this used to, silently truncated
   ## anything longer: 20 | divided_by: 7.0 rendered "2.8571428571".
   result = $f
+
+  # Nim's `$` stops at 16 significant digits, one short of what a few
+  # doubles need to read back exactly. Only a rendering that actually
+  # spent all 16 can be short, so the round-trip is checked on length
+  # first and the common "4.5"/"0.3" cases never pay for it.
+  if result.len >= 17 and result.parseFloat() != f:
+    result = f.formatFloat(ffDefault, 17)
+
+  # Ruby writes the exponent form with a decimal point — "1.0e+20" where
+  # Nim writes "1e+20".
   let e = result.find('e')
   if e > 0 and result.find('.', 0, e - 1) < 0:
     result.insert(".0", e)
