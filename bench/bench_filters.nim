@@ -170,6 +170,9 @@ proc workloads(): seq[Workload] =
   result.add wl("divided_by-int", "{{ i | divided_by: 2 }}")
   result.add wl("divided_by-float", "{{ f | divided_by: 7.0 }}")
   result.add wl("modulo", "{{ i | modulo: 5 }}")
+  # A string operand that is not a number at all: the branch that used to
+  # reach its answer by raising and catching an exception per operand.
+  result.add wl("plus-string-operand", "{{ s | plus: 1 }}")
   result.add wl("at_least", "{{ i | at_least: 50 }}")
   result.add wl("at_most", "{{ i | at_most: 10 }}")
 

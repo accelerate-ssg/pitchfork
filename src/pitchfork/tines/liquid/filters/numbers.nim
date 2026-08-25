@@ -13,19 +13,20 @@ proc to_numeric(v: VMValue): float =
       0.0
   else: 0.0
 
-# Check if a value is integer-like (int, or string that parses as int without decimals)
 proc is_int_like(v: VMValue): bool =
+  ## Whether an operand should keep integer arithmetic. A string counts
+  ## when it carries no decimal point: one that parses as an integer is
+  ## that integer, and one that parses as nothing at all converts to 0,
+  ## which is an integer too.
+  ##
+  ## That second case is why this used to run parseInt inside a
+  ## try/except and then return true from both arms — an exception
+  ## raised and caught per operand, to reach an answer the point alone
+  ## already gave.
   case v.kind
   of vmInt: true
   of vmFloat: false
-  of vmString:
-    if '.' in v.stringVal: false
-    else:
-      try:
-        discard v.stringVal.parseInt()
-        true
-      except:
-        true  # Non-numeric strings convert to 0 (integer)
+  of vmString: '.' notin v.stringVal
   of vmNull: true  # null → 0 (integer)
   else: true  # objects/arrays → 0 (integer)
 
