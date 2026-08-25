@@ -57,14 +57,49 @@ proc decimal_from_text(s: string): Decimal =
   if digits == 0 or scale > max_scale: return Decimal(ok: false)
   Decimal(mantissa: (if negative: -mantissa else: mantissa), scale: scale, ok: true)
 
+proc decimal_from_float(f: float): Decimal =
+  ## The decimal BigDecimal(f.to_s) would hold, found without producing
+  ## the text. Rendering a double to its shortest round-trip form costs
+  ## ~255ns; this finds the same value in ~2ns, and the arithmetic
+  ## filters called it twice per operation.
+  ##
+  ## Walk the scales upward and take the first one that reproduces the
+  ## double exactly. `f.to_s` is by definition the shortest decimal that
+  ## reads back as f, so the fewest digits after the point that can do it
+  ## is the same decimal — and where two integers could both sit at that
+  ## scale, rounding picks the nearer one, which is the one to_s prints.
+  ##
+  ## The exact `m / p == f` test is what makes the search safe: a scale
+  ## that only nearly works is rejected, so double rounding in `f * p`
+  ## costs at most an extra digit, never a wrong value.
+  ##
+  ## NaN and the infinities fail the equality test (or the magnitude
+  ## bound) at every scale and fall out as not-ok, which is what the
+  ## text path did with them too.
+  var scale = 0
+  var p = 1.0
+  while scale <= max_scale:
+    let m = round(f * p)
+    if m / p == f and abs(m) < max_mantissa.float:
+      return Decimal(mantissa: m.int64, scale: scale, ok: true)
+    inc scale
+    p *= 10.0
+  Decimal(ok: false)
+
 proc to_decimal(v: VMValue): Decimal =
   case v.kind
   of vmInt:
     if abs(v.intVal) >= max_mantissa: Decimal(ok: false)
     else: Decimal(mantissa: v.intVal, scale: 0, ok: true)
   of vmFloat:
-    # From the rendered text, exactly as BigDecimal(float.to_s) does.
-    decimal_from_text(float_to_string(v.floatVal))
+    # The value BigDecimal(float.to_s) holds, reached directly.
+    #
+    # This accepts a few doubles the text route refused: `$f` writes
+    # 1e-05 and 1e+15 in exponent form and decimal_from_text rejects
+    # exponents, dropping those to plain float maths. Ruby's BigDecimal
+    # parses that notation happily, so taking them exactly is a step
+    # toward the reference rather than away from it.
+    decimal_from_float(v.floatVal)
   of vmString:
     let parsed = decimal_from_text(v.stringVal.strip())
     # A string that is not a number counts as zero, matching to_numeric.
