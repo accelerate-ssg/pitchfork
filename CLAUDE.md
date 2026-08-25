@@ -42,7 +42,7 @@ load-bearing.
 
 ## Run tests
 
-- Main suite: `nim c -r test/golden_liquid.nim` (703 Liquid conformance
+- Main suite: `nim c -r test/golden_liquid.nim` (874 Liquid conformance
   tests). Run a group or single test by appending its quoted name.
 - Engine and tine suites: `test/engine.nim` (hand-assembled bytecode),
   `test/vm.nim` (Liquid through the VM, incl. tracking), 
