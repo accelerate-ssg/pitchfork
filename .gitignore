@@ -36,3 +36,4 @@ src/liquid_c
 # Compiled tine module binaries (the isMainModule baseline suites)
 src/pitchfork/tines/liquid/compiler
 src/pitchfork/tines/liquid/lexer/classify_identifier
+bench/bench_filters
