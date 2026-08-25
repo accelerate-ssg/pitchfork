@@ -37,3 +37,4 @@ src/liquid_c
 src/pitchfork/tines/liquid/compiler
 src/pitchfork/tines/liquid/lexer/classify_identifier
 bench/bench_filters
+bench/fuzzfloat
