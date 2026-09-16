@@ -23,23 +23,66 @@ const mustache_section_filter* = "mustache#section"
   ## values are falsy and what iterates. Language policy lives in the tine;
   ## the engine only provides the filter-call mechanism.
 
+const mustache_block_filter* = "mustache#block"
+  ## Presence test for an inheritance block's captured override. Not the
+  ## same question as a section's truthiness — see below.
+
 proc mustache_section_normalizer(value: VMValue, args: varargs[VMValue]): VMValue =
   ## Normalize a section value to the list of contexts the body renders
-  ## once per. Falsy (null/false) -> empty; "" and 0 are truthy; lists
-  ## iterate; anything else renders once with the value as context.
+  ## once per. Empty values are falsy — null, false, "", 0 and an empty
+  ## list or object; lists iterate; anything else renders once with the
+  ## value as context.
+  ##
+  ## The spec does not say what an empty value does to a section, so this
+  ## is a choice: match nim-mustache, the library Accelerate rendered
+  ## with before this engine, so a section guarding an optional text
+  ## field skips when the field is unset instead of emitting an empty
+  ## wrapper. For "", 0 and an empty list that is also what mustache.js
+  ## and hogan do. The empty *object* follows nim-mustache alone —
+  ## mustache.js tests JS truthiness, where {} is truthy and renders the
+  ## body once.
+  ##
+  ## Handlebars states its own policy next door in hb#section, and Liquid
+  ## the opposite one (only nil and false are falsy); the languages differ
+  ## here deliberately, which is why the rule lives in the tine.
   var items: seq[VMValue] = @[]
   case value.kind
   of vmNull, vmEmpty:
     discard
   of vmBool:
     if value.boolVal: items.add(value)
+  of vmString:
+    if value.stringVal.len > 0: items.add(value)
+  of vmInt:
+    if value.intVal != 0: items.add(value)
+  of vmFloat:
+    if value.floatVal != 0.0: items.add(value)
   of vmArray:
     items = value.arrayVal
+  of vmObject:
+    if value.objectVal.len > 0: items.add(value)
+  of vmNode:
+    # Unreachable: opCallFilter materializes a lazy value before it
+    # reaches a filter, because filters have no arena access. Named
+    # rather than left to an else so the invariant is visible here.
+    items.add(value)
+  VMValue(kind: vmArray, arrayVal: items)
+
+proc mustache_block_normalizer(value: VMValue, args: varargs[VMValue]): VMValue =
+  ## Was an override captured for this block? Only an unset local counts
+  ## as absent. An override that rendered to nothing is still an
+  ## override, and must suppress the block's default body — so this
+  ## cannot go through the section normalizer, where "" is falsy.
+  var items: seq[VMValue] = @[]
+  case value.kind
+  of vmNull, vmEmpty:
+    discard
   else:
     items.add(value)
   VMValue(kind: vmArray, arrayVal: items)
 
 register_filter(mustache_section_filter, mustache_section_normalizer)
+register_filter(mustache_block_filter, mustache_block_normalizer)
 
 type
   Compiler* = object of Emitter
@@ -117,13 +160,13 @@ proc compile_tokens(c: var Compiler, until_close: seq[string] = @[]) =
     of mBlockOpen:
       # {{$name}}…{{/name}}: render the override an enclosing {{<parent}}
       # call captured into __block_<name>, or the default body when the
-      # local is unset/empty. The emptiness test mirrors mInvertedOpen:
-      # normalize through the section filter so "unset" and "" both fall
-      # back to the default.
+      # local is unset. Presence, not truthiness — an override that
+      # rendered to nothing still wins over the default — so this uses
+      # the block normalizer rather than the section one.
       let blockVar = "__block_" & tok.name.join(".")
       c.emit_resolve(@[blockVar])
       c.emit(Instruction(op: opCallFilter,
-        filterId: c.intern_string(mustache_section_filter), argCount: 0))
+        filterId: c.intern_string(mustache_block_filter), argCount: 0))
       c.emit(Instruction(op: opPushEmpty))
       c.emit(Instruction(op: opEqual))
       let use_default = c.emit_jump(opJumpIfTrue)
@@ -167,8 +210,8 @@ proc compile_tokens(c: var Compiler, until_close: seq[string] = @[]) =
         includeIndentId: 0))
       # Clear the captures so a later parent call without an override for
       # a block falls back to that block's default. Null, not "": the
-      # empty string is truthy to mustache sections, so it would read as
-      # an (empty) override.
+      # block normalizer reads any non-null value as an override, so ""
+      # would read as an (empty) one.
       for blockVar in boundBlocks:
         c.emit(Instruction(op: opPushNull))
         c.emit(Instruction(op: opStoreVar,

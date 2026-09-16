@@ -96,6 +96,36 @@ when isMainModule:
       check render("{{^gone}}nothing{{/gone}}", %*{}) == "nothing"
       check render("{{^here}}nothing{{/here}}", %*{"here": true}) == ""
 
+    test "an empty value is falsy to a section":
+      # The spec is silent on these; this follows mustache.js, hogan and
+      # nim-mustache, so a section guarding an optional field skips when
+      # the field is unset rather than rendering an empty wrapper.
+      check render("{{#s}}[{{s}}]{{/s}}", %*{"s": ""}) == ""
+      check render("{{#n}}[{{n}}]{{/n}}", %*{"n": 0}) == ""
+      check render("{{#f}}[x]{{/f}}", %*{"f": 0.0}) == ""
+      check render("{{#l}}[x]{{/l}}", %*{"l": []}) == ""
+      # The empty object is the one case where nim-mustache and
+      # mustache.js disagree; this follows nim-mustache.
+      check render("{{#o}}[x]{{/o}}", %*{"o": {}}) == ""
+
+    test "a non-empty value is still truthy to a section":
+      check render("{{#s}}[{{s}}]{{/s}}", %*{"s": "v"}) == "[v]"
+      check render("{{#n}}[{{n}}]{{/n}}", %*{"n": 1}) == "[1]"
+      check render("{{#o}}[{{k}}]{{/o}}", %*{"o": {"k": "v"}}) == "[v]"
+
+    test "an inverted section is the complement":
+      check render("{{^s}}none{{/s}}", %*{"s": ""}) == "none"
+      check render("{{^s}}none{{/s}}", %*{"s": "v"}) == ""
+      check render("{{^n}}none{{/n}}", %*{"n": 0}) == "none"
+
+    test "an override that renders to nothing still beats the default":
+      # Presence, not truthiness: the captured override is "", which is
+      # falsy to a section but is still an override.
+      let parent = {"p": "<h1>{{$t}}default{{/t}}</h1>"}.toTable
+      check render("{{<p}}{{$t}}{{/t}}{{/p}}", %*{}, parent) == "<h1></h1>"
+      check render("{{<p}}{{$t}}given{{/t}}{{/p}}", %*{}, parent) == "<h1>given</h1>"
+      check render("{{<p}}{{/p}}", %*{}, parent) == "<h1>default</h1>"
+
     test "context stack fallback":
       let ctx = %*{"outer": "o", "sec": {"inner": "i"}}
       check render("{{#sec}}{{inner}}{{outer}}{{/sec}}", ctx) == "io"

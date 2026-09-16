@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- An empty value is falsy to a Mustache section. `""`, `0`, `0.0` and an
+  empty list or object now skip the section body, where before only
+  `null` and `false` did. The spec is silent on these, so this is a
+  choice: match nim-mustache — the library Accelerate rendered with
+  before this engine — so that a section guarding an optional text field
+  skips when the field is unset instead of emitting an empty wrapper.
+  For `""`, `0` and an empty list that is also what mustache.js and hogan
+  do; the empty object follows nim-mustache alone, since mustache.js
+  tests JS truthiness and renders `{}` once. Liquid and Handlebars are
+  unaffected — each states its own policy.
+
+  This is a behaviour change for templates that relied on `{{#field}}`
+  rendering for an empty string. Measured across the eight Accelerate
+  sites it was written for, it only ever removed empty markup — an
+  `<a href="tel:+46"></a>` with no number, an empty alert banner, empty
+  content wrappers.
+
+### Fixed
+
+- An inheritance block override that renders to nothing again suppresses
+  the block's default body. Block presence and section truthiness were
+  answering the same question through one filter; now `{{$block}}` asks
+  a separate `mustache#block` normalizer where only an unset local counts
+  as absent, so `{{<parent}}{{$title}}{{/title}}{{/parent}}` renders an
+  empty title rather than falling back to the parent's default.
+
 ## [0.2.1] - 2026-09-08
 
 ### Changed
