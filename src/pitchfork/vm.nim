@@ -886,9 +886,16 @@ proc execute*(vm: var VM): string =
       # Get loop variable name for offset: continue tracking
       let loop_var_name = vm.strings[inst.loopVarIndex]
 
-      # Clean up any stale iterator for this variable (from a broken loop)
+      # Clean up a stale iterator left behind by a loop that was broken out
+      # of: finishing it here is what records its loop_offsets entry for a
+      # later offset: continue. Only one this loop sits past, though —
+      # an iterator whose body still encloses us belongs to a running loop,
+      # and on the name alone {% for item in a %}{% for item in b %} would
+      # finish the outer loop's iterator and never terminate.
+      let loop_origin = vm.pc - 1
       for i in countdown(vm.iterators.len - 1, 0):
-        if vm.iterators[i].var_name == loop_var_name:
+        if vm.iterators[i].var_name == loop_var_name and
+           loop_origin >= vm.iterators[i].body_end:
           vm.finish_iterator(i)
           break
 
@@ -993,6 +1000,10 @@ proc execute*(vm: var VM): string =
 
     of opIterNext:
       if vm.iterators.len > 0:
+        # Only opIterNext carries the offset past the endfor, and the
+        # stale-iterator sweep needs it to tell a running loop from a
+        # leftover.
+        vm.iterators[^1].body_end = vm.pc + inst.endOffset
         if vm.pending_break:
           # Break from included partial: end the loop immediately
           vm.pending_break = false
@@ -1029,6 +1040,11 @@ proc execute*(vm: var VM): string =
               vm.pc += inst.elseOffset
             else:
               vm.pc += inst.endOffset
+      else:
+        # The iterator is gone before its loop ended. Falling through here
+        # re-enters the loop body with nothing to advance it, so leave the
+        # loop instead of spinning.
+        vm.pc += inst.endOffset
     
     # Comparison
     of opEqual:

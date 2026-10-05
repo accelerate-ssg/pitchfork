@@ -129,6 +129,8 @@ type
                            # (Mustache) leave this off.
     index*: int
     var_name*: string
+    body_end*: int       # pc this loop's endfor leads to; 0 until its first
+                         # opIterNext has run
     original_offset*: int  # Offset applied to original collection (for offset: continue tracking)
     saved_var*: VMValue      # Pre-loop binding of the loop variable, if any.
                              # Liquid scopes the loop variable to the loop:
