@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.2] - 2026-10-07
+
+### Fixed
+
+- The package installs its own public API again. `installDirs` listed
+  `pitchfork`, `liquid` and `liquid_lib`; the last two have not been
+  directories since the tine refactor, and naming only `pitchfork` meant
+  nimble installed that subdirectory *alone* — so an installed copy had no
+  `mustache_lib.nim`, `liquid_lib.nim`, `handlebars_lib.nim` or
+  `pitchfork.nim`, and a consumer got "cannot open file: mustache_lib".
+  Dropping `installDirs` lets nimble install all of `srcDir`, which is what
+  a library package of this shape wants. The breakage was invisible to
+  Accelerate because its `src/nim.cfg` prefers a sibling working copy, so
+  only a build without one — CI — ever saw it.
+- Fetch the arena dependency over HTTPS rather than `git+ssh://`. SSH has
+  no anonymous mode, so a bare CI runner could not resolve it even with
+  arena public, and the transitive requirement defeated the same fix made
+  in Accelerate's own manifest.
+
+### Known
+
+- nimble warns that the package "has an incorrect structure" because the
+  top level of `srcDir` holds more than one module. The four per-language
+  entry points (`mustache_lib`, `liquid_lib`, `handlebars_lib`, `pitchfork`)
+  are the public API and consumers import them by name, so collapsing them
+  to a single module is an API change, not packaging. Warning today, an
+  error in a future nimble.
+
 ## [0.3.1] - 2026-10-07
 
 ### Fixed
