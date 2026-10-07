@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-10-07
+
+### Fixed
+
+- Nested loops that share a loop variable name terminate.
+  `{% for item in a %}{% for item in b %}{% endfor %}{% endfor %}` hung and
+  grew the output without bound. The stale-iterator sweep that runs when a
+  loop starts matched on the variable name alone, so the inner loop finished
+  the enclosing loop's iterator; the outer `endfor` then found no iterator
+  and, with nothing left to advance the loop, control fell back into its body
+  forever. The sweep now also requires that the new loop begin past the stale
+  loop's `endfor`. That still reaches a leftover from an earlier sibling loop
+  — which is what records the offset a later `offset: continue` reads after a
+  `{% break %}` — while leaving a running enclosing loop alone.
+- `opIterNext` leaves its loop when the iterator is missing instead of
+  falling through into the loop body, so a lost iterator can no longer spin.
+
 ## [0.3.0] - 2026-09-16
 
 ### Changed
