@@ -1,6 +1,6 @@
 # Package
 
-version       = "0.3.2"
+version       = "0.4.0"
 author        = "Jonas Schubert Erlandsson, Hannes Elvemyr, Claude"
 description   = "Multi-language template engine: one bytecode VM, per-language frontends"
 license       = "MIT"
@@ -17,4 +17,4 @@ requires "https://github.com/accelerate-ssg/arena.git#v0.1.1"
 # Tasks
 
 task clib, "Build C shared library":
-  exec "nim c --app:lib -d:release -o:libliquid.dylib src/liquid_c.nim"
+  exec "nim c --app:lib -d:release -o:libliquid.dylib src/pitchfork/liquid_c.nim"

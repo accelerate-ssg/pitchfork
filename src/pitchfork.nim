@@ -5,7 +5,7 @@
 #
 # This module exports the language-agnostic engine core. Template language
 # frontends live under pitchfork/tines/ — e.g. pitchfork/tines/liquid/api
-# for the Liquid frontend, or the liquid_lib convenience API.
+# for the Liquid frontend, or the pitchfork/liquid_lib convenience API.
 
 import pitchfork/[bytecode, values, emitter, vm_types, vm, filters, json_bridge]
 

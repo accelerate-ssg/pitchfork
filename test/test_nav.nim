@@ -1,5 +1,5 @@
 import std/[json, tables, os, strutils, sequtils]
-import ../src/liquid_lib
+import ../src/pitchfork/liquid_lib
 
 let testDir = currentSourcePath().parentDir() / "menu"
 

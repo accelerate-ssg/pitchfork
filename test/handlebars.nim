@@ -4,7 +4,7 @@
 # the supported feature set (see compiler.nim header for scope notes).
 
 import std/[unittest, json, tables, sets]
-import ../src/handlebars_lib
+import ../src/pitchfork/handlebars_lib
 import ../src/pitchfork/tines/handlebars/api as hb_api
 
 suite "Handlebars interpolation":

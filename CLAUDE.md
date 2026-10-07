@@ -47,7 +47,8 @@ load-bearing.
 - Engine and tine suites: `test/engine.nim` (hand-assembled bytecode),
   `test/vm.nim` (Liquid through the VM, incl. tracking), 
   `test/mustache_spec.nim` (official spec JSONs), `test/handlebars.nim`.
-- Library API + arena suite: `nim c -r src/liquid_lib.nim`.
+- Library API + arena suite: `nim c -r src/pitchfork/liquid_lib.nim`.
+- Float rendering and decimal shortening: `nim c -r src/pitchfork/values.nim`.
 - All of the above must pass before a change lands.
 
 ## Benchmarks
@@ -66,17 +67,20 @@ load-bearing.
 - Liquid tine: src/pitchfork/tines/liquid/{api,lexer,compiler,runtime}.nim
   plus lexer/ and filters/ subdirectories
 - Mustache and Handlebars tines: src/pitchfork/tines/{mustache,handlebars}/
-- Public libraries: src/{liquid_lib, mustache_lib, handlebars_lib,
-  liquid_c}.nim — liquid_lib's arena render overloads and its exports of
-  VMValue/VMValueKind/wrap_arena_node are used by acc_liquid (an acc2
-  plugin); do not break them.
+- Public libraries: src/pitchfork/{liquid_lib, mustache_lib,
+  handlebars_lib, liquid_c}.nim — liquid_lib's arena render overloads and
+  its exports of VMValue/VMValueKind/wrap_arena_node are used by acc_liquid
+  (an acc2 plugin); do not break them. Consumers import them by package
+  path, `import pitchfork/liquid_lib`, and they live under src/pitchfork/
+  because nimble allows srcDir only one top-level module, pitchfork.nim.
 
 ## Tests
 
 - The lexer and compiler files have baseline suites that run when you
   compile and run that file (isMainModule); liquid_lib.nim carries the
-  API + arena suite the same way. Add to these when a new feature is
-  added and keep them passing when editing the implementation.
+  API + arena suite and values.nim the float rendering suite, the same way.
+  Add to these when a new feature is added and keep them passing when
+  editing the implementation.
 - Main test suite is test/golden_liquid.nim and the helpers in
   test/golden_liquid/helpers.nim
 

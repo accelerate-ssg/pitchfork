@@ -28,12 +28,13 @@ bench/bench_compare
 # Compiled library binaries (defensive)
 # (src/pitchfork deliberately absent: that name is the engine's source
 # directory, and an ignore rule for it would swallow new engine files)
-src/liquid_lib
-src/mustache_lib
-src/handlebars_lib
-src/liquid_c
+src/pitchfork/liquid_lib
+src/pitchfork/mustache_lib
+src/pitchfork/handlebars_lib
+src/pitchfork/liquid_c
 
 # Compiled tine module binaries (the isMainModule baseline suites)
+src/pitchfork/values
 src/pitchfork/tines/liquid/compiler
 src/pitchfork/tines/liquid/lexer/classify_identifier
 bench/bench_filters

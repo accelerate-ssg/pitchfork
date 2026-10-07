@@ -5,6 +5,145 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-10-07
+
+### Changed
+
+Migration note first: the public modules moved, so every consumer's import
+line changes.
+
+- The four public entry points are now `src/pitchfork/{liquid_lib,
+  mustache_lib, handlebars_lib, liquid_c}.nim`, so `import liquid_lib`
+  becomes `import pitchfork/liquid_lib` and likewise for the others. Nimble
+  allows `srcDir` only one top-level module, named for the package, and
+  `nimble check` had been failing validation over the other three — which
+  0.3.2 recorded under Known and could not fix, because the two ways out
+  nimble offers are renaming (only one of four can be `pitchfork.nim`) and
+  `skipFiles` (which stops them being installed, the very bug 0.3.2 fixed).
+  Moving them is the third way and the only one that keeps them installed.
+  `pitchfork.nim` still exports the engine core alone, so importing it does
+  not drag in `arena_context_store`.
+- Floats render as the shortest decimal that reads back as the double. The
+  scales are walked upward and the first whose parse reproduces the value is
+  taken, so the result is right by construction rather than by argument;
+  anything the walk cannot pin down is rendered once at seventeen
+  significant digits, which always reads back, and shortened from there by
+  parsing candidates rather than rendering again. Templates see:
+  - Full precision, where the old renderer truncated at ten decimal places.
+    `{{ 20 | divided_by: 7.0 }}` is now `2.857142857142857` rather than
+    `2.8571428571`, and the doubles that need all 17 digits get all 17.
+  - Double error no longer rounded out of sight. Truncating at ten places
+    hid it, so `{{ 10.1 | minus: 2.2 }}` used to print `7.9`; it now prints
+    `7.8999999999999995`, which is the double the arithmetic produced. This
+    is the one rendering change an existing template can notice, and it
+    only reaches templates doing arithmetic on non-integral numbers.
+  - Short renderings get quicker and the longest get slower. A float of the
+    length a template usually carries renders ~43% faster, `plus` and
+    `minus` on float operands ~27% faster and `divided_by` ~18%; a value
+    needing all seventeen digits costs about half again what 0.3.2 charged,
+    which is the price of printing it correctly rather than truncating it.
+    75157 of 8.6M sampled doubles now render shorter.
+- Three `want` values in the golden corpus are deliberately edited away from
+  the reference implementation's, which runs the arithmetic filters on Ruby
+  BigDecimals built from each operand's text and so reports what a human
+  would write. We use doubles and record what doubles produce.
+  `test/golden_liquid.nim` names all three, since JSON has nowhere to say a
+  value was changed. They are the whole of the difference.
+- The group enable-list in the golden runner is now a skip-list: a group runs
+  unless it is deliberately named. An entry matching no group fails the
+  suite, so a rename cannot leave a stale entry protecting nothing, and the
+  skipped case count and suite names are reported in both summary branches so
+  a green run never implies full conformance. The list is currently empty.
+- `is_int_like` decides from the decimal point alone instead of running
+  `parseInt` inside a try/except for every string operand — both arms
+  returned true, so the exception was raised and caught to reach an answer
+  the point had already given. A non-numeric string operand renders ~23%
+  faster.
+
+### Added
+
+- The `{% liquid %}` multi-line tag. Statements are separated by newlines and
+  may also share the tag's opening line; CRLF endings, comment statements and
+  a repeated `liquid` keyword all lex. The tag's own `{%-` and `-%}` are
+  handed to the first and last statement it produces, so text around the tag
+  trims as it would around any single tag, and a body of nothing but comments
+  still emits an empty text section to carry those flags. The body may not
+  close a block opened outside the tag, and must close whatever it opens.
+- The leading-hash rule for inline comment tags: once a comment spans lines,
+  every further line must open with its own `#`.
+- `strip_html` strips `script`, `style` and comment blocks together with
+  their contents before it removes loose tags, so
+  `{{ '<script>var a=1</script>hi' | strip_html }}` renders `hi` where it
+  used to render `var a=1hi`.
+- A baseline suite in `src/pitchfork/values.nim` for float rendering and the
+  decimal shortening underneath it, including the half-way last digit that
+  can fall either way and the carry that runs off the front of 9.99.
+- `bench/bench_filters.nim`, a wide flat companion to `bench_vm`: one
+  workload for every registered filter, 76 in all with the arithmetic filters
+  split by operand type, each with a measured floor subtracted so the column
+  to read is the filter's own per-call cost. It emits the JSON shape
+  `bench/bench_compare.nim` already reads, and quits on a workload that
+  renders nothing rather than reporting a missing or raising filter as
+  impossibly fast.
+- `bench/fuzzfloat.nim`, which fuzzes float rendering over structured values,
+  decimal fractions, division results and raw bit patterns and fails on any
+  rendering that does not read back as the double it came from.
+
+### Fixed
+
+- The golden Liquid runner silently skipped 20 of its groups. The suite
+  name was normalized with `replace("_", " ")` while the enable-list spelled
+  multi-word filter names with underscores intact (`"at_least filter"`), so
+  those entries could never match and their groups were dropped without a
+  word: 171 of the 874 cases never ran, yet the summary still read "All 703
+  tests passed!". All 874 cases in all 80 groups now run and pass, and most
+  of the filter fixes below are what became visible once they did.
+- `{% liquid %}` no longer raises `IndexDefect` out of the lexer. The scanner
+  read past the end of the input on any body not ending in a newline, and its
+  unterminated-block position ran backwards into a loop the caller could not
+  leave.
+- `{% liquidate %}` and friends are no longer lexed as a liquid tag; the
+  keyword check now respects the word boundary.
+- A lone carriage return no longer separates statements inside `{% liquid %}`.
+  Only a newline does, so a CR-terminated body is the single malformed
+  statement the reference implementation rejects.
+- `url_encode` did neither form nor path encoding: it escaped a hand-picked
+  five characters and left `@`, `!` and the rest of the reserved set
+  standing. It now percent-encodes everything outside the unreserved set and
+  writes a space as `+`.
+- `url_decode` was the inverse of nothing. It now decodes `+` and every `%XX`
+  escape, and leaves a truncated escape standing rather than raising, as
+  `CGI.unescape` does.
+- `newline_to_br` dropped the newline it replaced, so `"a\nb"` rendered as
+  `a<br />b`; it is now `a<br />\nb`, and a CRLF collapses to a single break.
+- `escape_once` decided per string instead of per character, which left raw
+  markup unescaped whenever an entity appeared anywhere in the same string.
+- `sort_natural` ignored its property argument, compared objects by a
+  constant `"{}"`, and sorted nils first instead of last.
+- `replace_first` raised on a single argument; the replacement is optional and
+  defaults to empty, unlike `replace_last`.
+- `escape_once`, `newline_to_br`, `strip_html`, `strip_newlines`,
+  `url_decode` and `url_encode` silently ignored an unexpected extra
+  argument.
+- `base64_decode` and `base64_url_safe_decode` accepted input that is not
+  base64, and base64 encoding refused non-string input.
+- `at_least` and `at_most` returned the raw operand rather than the number
+  they compared, so `-1 | at_least: "abc"` rendered `abc`.
+- `date_now` raised on every call. It passed its strftime pattern to Nim's
+  `DateTime.format`, which rejects the `%`, so `{{ x | date_now }}` threw
+  `TimeFormatParseError` on the default format and on any format a template
+  supplied. It now routes through `liquid_date_format`, the strftime
+  formatter the `date` filter in the same module already uses. The golden
+  suite does not cover `date_now`; the new filter benchmark found it.
+- `bench/mustache_bench.nim` builds from a clean checkout. It imported
+  `moustachu` and `mustache` unconditionally, neither of which is a
+  dependency of this package, so the file could not compile anywhere they
+  were absent. The comparisons are now opt-in behind `-d:moustachu` and
+  `-d:nimMustache`, and Pitchfork's own numbers need nothing extra.
+- Removed `test/bench_vm.nim` and `test/bench_compare.nim`, stale copies of
+  the `bench/` versions that still imported the deleted `src/liquid/*` paths
+  and no longer compiled.
+
 ## [0.3.2] - 2026-10-07
 
 ### Fixed

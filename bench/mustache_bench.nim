@@ -1,8 +1,16 @@
-# Mustache benchmark: Pitchfork's Mustache tine vs moustachu vs
-# nim-mustache (the `mustache` package, as used by acc's mustache plugin)
+# Mustache benchmark: Pitchfork's Mustache tine, on its own or against
+# moustachu and nim-mustache (the `mustache` package, as used by acc's
+# mustache plugin)
 # ======================================================================
-# Compile with:
-#   nim c -d:release -p:<moustachu>/src -p:<nim-mustache>/src bench/mustache_bench.nim
+# Our own numbers need nothing that is not already here:
+#   nim c -d:release bench/mustache_bench.nim
+#
+# The comparisons are opt-in. Neither library is a dependency of this
+# package, so importing them unconditionally left this file unbuildable
+# anywhere they were missing — which is every clean checkout:
+#   nim c -d:release -d:moustachu -p:<moustachu>/src \
+#                    -d:nimMustache -p:<nim-mustache>/src \
+#                    bench/mustache_bench.nim
 #
 # Scenarios:
 #   A. parse + render every iteration (the other libraries' only mode)
@@ -12,11 +20,16 @@
 
 import std/[json, monotimes, times, strutils, strformat, tables]
 
-import ../src/mustache_lib as pitchfork
+import ../src/pitchfork/mustache_lib as pitchfork
 import ../src/pitchfork/tines/mustache/api as pf_api
 import ../src/pitchfork/json_bridge
-import moustachu
-import mustache as nim_mustache
+const with_moustachu = defined(moustachu)
+const with_nim_mustache = defined(nimMustache)
+
+when with_moustachu:
+  import moustachu
+when with_nim_mustache:
+  import mustache as nim_mustache
 
 # ── Fixtures ──────────────────────────────────────────────────────────
 
@@ -76,10 +89,12 @@ proc main() =
   let pdata = page_data(100)
 
   # Pre-built contexts
-  let s_ctx_m = moustachu.newContext(sdata)
-  let p_ctx_m = moustachu.newContext(pdata)
-  let s_ctx_nm = nim_mustache.newContext(values = nim_mustache.toValues(sdata))
-  let p_ctx_nm = nim_mustache.newContext(values = nim_mustache.toValues(pdata))
+  when with_moustachu:
+    let s_ctx_m = moustachu.newContext(sdata)
+    let p_ctx_m = moustachu.newContext(pdata)
+  when with_nim_mustache:
+    let s_ctx_nm = nim_mustache.newContext(values = nim_mustache.toValues(sdata))
+    let p_ctx_nm = nim_mustache.newContext(values = nim_mustache.toValues(pdata))
   let s_root = json_to_vmvalue(sdata)
   let s_table = json_to_vm_table(sdata)
   let p_root = json_to_vmvalue(pdata)
@@ -88,16 +103,21 @@ proc main() =
 
   # Correctness cross-check before timing
   let pf_small = pitchfork.render(small_template, sdata)
-  let m_small = moustachu.render(small_template, sdata)
-  doAssert pf_small == m_small, "small outputs differ:\n" & pf_small & "\n---\n" & m_small
   let pf_page = pitchfork.render(page_template, pdata)
-  let m_page = moustachu.render(page_template, pdata)
-  doAssert pf_page == m_page, "page outputs differ"
-  let nm_small = nim_mustache.render(small_template, s_ctx_nm)
-  doAssert pf_small == nm_small, "nim-mustache small differs:\n" & nm_small
-  let nm_page = nim_mustache.render(page_template, p_ctx_nm)
-  doAssert pf_page == nm_page, "nim-mustache page differs"
-  echo &"outputs identical (small: {pf_small.len} bytes, page: {pf_page.len} bytes)"
+  when with_moustachu:
+    let m_small = moustachu.render(small_template, sdata)
+    doAssert pf_small == m_small, "small outputs differ:\n" & pf_small & "\n---\n" & m_small
+    let m_page = moustachu.render(page_template, pdata)
+    doAssert pf_page == m_page, "page outputs differ"
+  when with_nim_mustache:
+    let nm_small = nim_mustache.render(small_template, s_ctx_nm)
+    doAssert pf_small == nm_small, "nim-mustache small differs:\n" & nm_small
+    let nm_page = nim_mustache.render(page_template, p_ctx_nm)
+    doAssert pf_page == nm_page, "nim-mustache page differs"
+  when with_moustachu or with_nim_mustache:
+    echo &"outputs identical (small: {pf_small.len} bytes, page: {pf_page.len} bytes)"
+  else:
+    echo &"rendered (small: {pf_small.len} bytes, page: {pf_page.len} bytes)"
   echo ""
 
   echo "Scenario A - parse + render every iteration"
@@ -105,20 +125,24 @@ proc main() =
     let compiled = pf_api.compile_source(small_template)
     blackhole += pf_api.render(compiled.bytecode, compiled.strings,
                                compiled.constants, s_root, s_table, no_partials).len
-  let a2 = bench("moustachu  small template", 100_000):
-    blackhole += moustachu.render(small_template, s_ctx_m).len
-  let a5 = bench("nim-mustache (acc's lib)  small template", 100_000):
-    blackhole += nim_mustache.render(small_template, s_ctx_nm).len
+  when with_moustachu:
+    let a2 = bench("moustachu  small template", 100_000):
+      blackhole += moustachu.render(small_template, s_ctx_m).len
+  when with_nim_mustache:
+    let a5 = bench("nim-mustache (acc's lib)  small template", 100_000):
+      blackhole += nim_mustache.render(small_template, s_ctx_nm).len
   let a3 = bench("pitchfork  page template (100 products)", 2_000):
     let compiled = pf_api.compile_source(page_template)
     blackhole += pf_api.render(compiled.bytecode, compiled.strings,
                                compiled.constants, p_root, p_table, no_partials).len
-  let a4 = bench("moustachu  page template (100 products)", 2_000):
-    blackhole += moustachu.render(page_template, p_ctx_m).len
-  let a6 = bench("nim-mustache (acc's lib)  page template", 2_000):
-    blackhole += nim_mustache.render(page_template, p_ctx_nm).len
-  echo &"  vs moustachu:    small {a2 / a1:.2f}x, page {a4 / a3:.2f}x  (their time / ours; >1 = we win)"
-  echo &"  vs nim-mustache: small {a5 / a1:.2f}x, page {a6 / a3:.2f}x"
+  when with_moustachu:
+    let a4 = bench("moustachu  page template (100 products)", 2_000):
+      blackhole += moustachu.render(page_template, p_ctx_m).len
+    echo &"  vs moustachu:    small {a2 / a1:.2f}x, page {a4 / a3:.2f}x  (their time / ours; >1 = we win)"
+  when with_nim_mustache:
+    let a6 = bench("nim-mustache (acc's lib)  page template", 2_000):
+      blackhole += nim_mustache.render(page_template, p_ctx_nm).len
+    echo &"  vs nim-mustache: small {a5 / a1:.2f}x, page {a6 / a3:.2f}x"
   echo ""
 
   echo "Scenario B - compile once, render many (pitchfork only mode)"
@@ -130,8 +154,10 @@ proc main() =
   let b2 = bench("pitchfork  page template, precompiled", 2_000):
     blackhole += pf_api.render(page_compiled.bytecode, page_compiled.strings,
                                page_compiled.constants, p_root, p_table, no_partials).len
-  echo &"  vs moustachu:    small {a2 / b1:.2f}x, page {a4 / b2:.2f}x  (their time / ours; >1 = we win)"
-  echo &"  vs nim-mustache: small {a5 / b1:.2f}x, page {a6 / b2:.2f}x"
+  when with_moustachu:
+    echo &"  vs moustachu:    small {a2 / b1:.2f}x, page {a4 / b2:.2f}x  (their time / ours; >1 = we win)"
+  when with_nim_mustache:
+    echo &"  vs nim-mustache: small {a5 / b1:.2f}x, page {a6 / b2:.2f}x"
   echo ""
   echo "(blackhole: ", blackhole, ")"
 

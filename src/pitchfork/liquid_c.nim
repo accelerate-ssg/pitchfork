@@ -1,7 +1,7 @@
 # Liquid C Library API
 # ====================
 # C-compatible shared library interface for the Liquid template engine.
-# Build with: nim c --app:lib -d:release -o:libliquid.dylib src/liquid_c.nim
+# Build with: nim c --app:lib -d:release -o:libliquid.dylib src/pitchfork/liquid_c.nim
 
 import std/[json, tables]
 import liquid_lib

@@ -5,7 +5,7 @@
 # not vendored (lambdas are deliberately out of scope for now).
 
 import std/[json, os, tables, strutils]
-import ../src/mustache_lib
+import ../src/pitchfork/mustache_lib
 
 const suites = ["interpolation", "sections", "inverted", "comments",
                 "delimiters", "partials"]

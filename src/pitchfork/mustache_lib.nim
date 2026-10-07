@@ -6,8 +6,8 @@
 # Mirrors liquid_lib.
 
 import std/[json, tables, sets]
-import pitchfork/json_bridge
-import pitchfork/tines/mustache/api
+import json_bridge
+import tines/mustache/api
 
 export json_bridge
 

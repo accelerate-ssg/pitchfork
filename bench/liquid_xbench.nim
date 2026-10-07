@@ -1,6 +1,6 @@
 # Cross-tree Liquid VM benchmark: identical workload, each tree's liquid_lib.
 import std/[json, monotimes, times, tables, strutils]
-import ../src/liquid_lib
+import ../src/pitchfork/liquid_lib
 
 const small_tmpl = "Hello {{ name }}, you have {{ count }} new {% if plural %}messages{% else %}message{% endif %}."
 const page_tmpl = """<html><head><title>{{ title }}</title></head><body>

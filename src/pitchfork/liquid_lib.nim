@@ -7,9 +7,9 @@
 
 import std/[json, tables, sets]
 import arena_context_store
-import pitchfork/json_bridge
-import pitchfork/tines/liquid/api
-import pitchfork/bytecode as pf_bytecode
+import json_bridge
+import tines/liquid/api
+import bytecode as pf_bytecode
 
 export json_bridge
 export pf_bytecode.VMValue, pf_bytecode.VMValueKind
