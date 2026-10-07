@@ -1,7 +1,7 @@
 # Package
 
 version       = "0.3.0"
-author        = "Jonas Schubert Erlandsson, Claude"
+author        = "Jonas Schubert Erlandsson, Hannes Elvemyr, Claude"
 description   = "Multi-language template engine: one bytecode VM, per-language frontends"
 license       = "MIT"
 srcDir        = "src"
