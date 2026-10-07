@@ -1,0 +1,162 @@
+<section class="price-calculator">
+  <h1>Priskalkylator</h1>
+  <form>
+    <div class="price-calculator__row">
+      <label class="price-calculator__label" for="hosting">
+        Drift av sidan
+      </label>
+      <div class="price-calculator__input price-calculator__input--placeholder">
+        &nbsp;
+      </div>
+      <span class="price-calculator__per-year">
+        <span class="price-calculator__hosting-cost-per-year">{{ site.variables.heimr_hosting_per_year }}</span>
+        :- per år
+      </span>
+    </div>
+    <div class="price-calculator__row">
+      <label class="price-calculator__label" for="updates">
+        Hur ofta ska vi publicera dina uppdateringar?
+      </label>
+      <div class="price-calculator__container">
+        <select class="price-calculator__select" id="updates" name="updates">
+          <option value="0">aldrig</option>
+          <option value="1" selected>varje kvartal</option>
+          <option value="2">varje månad</option>
+          <option value="5">varje vecka</option>
+          <option value="10">oftare</option>
+        </select>
+      </div>
+      <span class="price-calculator__per-year">
+        <span class="price-calculator__updates-cost-per-year">{{ site.variables.hourly_rate }}</span>
+        :- per år
+      </span>
+    </div>
+    <div class="price-calculator__row">
+      <label class="price-calculator__label" for="domains">
+        Hur många domäner vill du ha?
+      </label>
+      <input
+        class="price-calculator__input"
+        id="domains"
+        type="integer"
+        name="domains"
+        value="1"
+      />
+      <span class="price-calculator__per-year">
+        <span class="price-calculator__domains-cost-per-year">0</span>
+        :- per år
+      </span>
+    </div>
+    <div class="price-calculator__row">
+      <label class="price-calculator__label" for="email_aliases">
+        Hur många epostadresser med vidarebefordran behöver du?
+      </label>
+      <input
+        class="price-calculator__input"
+        id="email_aliases"
+        type="integer"
+        readonly="true"
+        name="email_aliases"
+        value="obegränsat"
+      />
+      <span class="price-calculator__per-year">
+        <span class="price-calculator__email-forward-cost-per-year">0</span>
+        :- per år
+      </span>
+    </div>
+    <div class="price-calculator__row">
+      <label class="price-calculator__label" for="email_inboxes">
+        Hur många epostadresser med inloggning behöver du?
+      </label>
+      <input
+        class="price-calculator__input"
+        id="email_inboxes"
+        type="integer"
+        name="email_inboxes"
+        value="2"
+      />
+      <span class="price-calculator__per-year">
+        <span class="price-calculator__email-inboxes-cost-per-year">0</span>
+        :- per år
+      </span>
+    </div>
+    <div class="price-calculator__row">
+      <h2 class="price-calculator__label">Totalt</h2>
+      <span class="price-calculator__total-per-year">
+        <span class="price-calculator__total-cost-per-year">{{ site.variables.heimr_hosting_per_year+site.variables.hourly_rate }}</span>
+        :- per år (
+        <span class="price-calculator__total-cost-per-month">{{ (site.variables.heimr_hosting_per_year+site.variables.hourly_rate)/12 }}</span>
+        :- i månaden)
+      </span>
+    </div>
+  </form>
+  <hr class="break break--slim" />
+  <ul>
+    <li>Alla priser är angivna utan moms.</li>
+    <li>För andra domäner än .com, .se, .net eller .org hör av er för pris.</li>
+    <li>
+      Det finns extra stora e-postkonton som tillval, med 50GB lagringsutrymme
+      per konto istället för 3GB.
+    </li>
+  </ul>
+</section>
+<h1>Exempel</h1>
+<p>Klicka på ett av korten för att ladda det exemplet i priskalkylatorn.</p>
+<div class="raised-cards price-calculator__examples">
+  <div
+    class="raised-cards__card price-calculator__example price-calculator__example--active"
+    data-domains="1"
+    data-updates="1"
+    data-email-inboxes="0"
+  >
+    <div class="raised-cards__content">
+      <h1 class="raised-cards__header">Standard</h1>
+      <p>
+        En sida med en domän och en info@-adress som går vidare till egen gmail
+        eller dylikt.
+      </p>
+      <p>
+        Uppdateras 4-6 gånger per år med lite nyheter, nya öppettider och
+        bilder.
+      </p>
+    </div>
+  </div>
+  <div
+    class="raised-cards__card price-calculator__example"
+    data-domains="2"
+    data-updates="2"
+    data-email-inboxes="1"
+  >
+    <div class="raised-cards__content">
+      <h1 class="raised-cards__header">Mellan</h1>
+      <p>
+        En sida med ett par domäner och en riktig inkorg för info@-adressen.
+      </p>
+      <p>
+        Uppdateras en gång i månaden med nyheter, erbjudanden och produktbilder.
+      </p>
+    </div>
+  </div>
+  <div
+    class="raised-cards__card price-calculator__example"
+    data-domains="5"
+    data-updates="10"
+    data-email-inboxes="5"
+  >
+    <div class="raised-cards__content">
+      <h1 class="raised-cards__header">Stor</h1>
+      <p>
+        Större sida med många domäner, anställda med egen epost på företagets
+        huvuddomän, alias från de andra domänerna till huvuddomänen.
+      </p>
+      <p>
+        Uppdateras minst en gång i veckan med nyheter, produkter, erbjudanden
+        och blogartiklar.
+      </p>
+    </div>
+  </div>
+</div>
+<script
+  type="text/javascript"
+  src="/assets/javascripts/price-calculator.js"
+></script>

@@ -1,0 +1,43 @@
+<!doctype html>
+<html
+  xmlns:og="http://opengraphprotocol.org/schema/"
+  xmlns:fb="http://www.facebook.com/2008/fbml"
+  xmlns:article="http://ogp.me/ns/article"
+  itemscope
+  itemtype="http://schema.org/Article"
+  class="no-js"
+  lang="{{ page.language | default: 'sv-SE' }}"
+>
+  {%- capture extra_meta -%} {%- include blog_meta.html -%} {%- endcapture -%}
+  {%- include head.html extra_meta=extra_meta -%}
+  <body class="blog-template">
+    {%- include header.html -%} {%- include menu.html -%}
+
+    <main role="main" class="content">
+      <article class="content__article">
+        <div
+          class="blog-post__hero"
+          style="
+          --blog-post__image: url(/assets/images/blogg/{{ page.path | replace: '_artiklar/', '' | replace: '.md', '' }}/title.jpg);
+        "
+        >
+          <h1 class="blog-post__title">{{ page.title }}</h1>
+        </div>
+        {{ content }}
+        <div class="blog-footer-nav">
+          {%- if page.previous.url -%}
+          <a class="blog-footer-nav__link" href="{{page.previous.url}}"
+            >&laquo; {{page.previous.title}}</a
+          >
+          {%- endif -%} {%- if page.next.url -%}
+          <a class="blog-footer-nav__link" href="{{page.next.url}}"
+            >{{page.next.title}} &raquo;</a
+          >
+          {%- endif -%}
+        </div>
+      </article>
+    </main>
+
+    {%- include footer.html -%}
+  </body>
+</html>
