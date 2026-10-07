@@ -1,0 +1,67 @@
+{%- assign url_parts = page.permalink | split: '/' -%}
+{%- assign url_parts_size = url_parts | size -%}
+{%- assign parent_permalink = "" -%}
+<nav class="main-menu">
+  <span class="main-menu__breadcrumbs">
+    {%- comment -%}
+    Always include the "Hem" part of breadcrumbs.
+
+    The inlne if-statement, that also exists in the other <a> tag below,
+    is there to set the active class on the manu if we are on the page the link represents.
+    {%- endcomment -%}
+    <a class="main-menu__link main-menu__link--breadcrumb{% if page.permalink == '/home' %} main-menu__link--active{% endif %}" href="/home">Hem</a>
+    {%- comment -%}
+    Skip the /home page, since it is standing in for / in our menu structure.
+    {%- endcomment -%}
+    {%- unless page.permalink == '/home' -%}
+      {%- comment -%}
+      The permalink starts with a /, '/hosting' for example, and when we split it we get ['','hosting'],
+      so we need to skip the first one since it is always just an empty string.
+
+      Loop over the url_parts of the current page, for example ['','hosting','seo','details'],
+      and for each new step build a string containing all the parts until now and link to that page.
+      So we already have a link to /home from above, now we add links to /hosting, /hosting/seo and
+      /hosting/seo/details, linking the pages with their title as text so we end up with these breadcrumbs:
+      Hem / Hemsida / Sökmotoroptimering / Detaljer
+      {%- endcomment -%}
+      {%- for url_part in url_parts offset:1 -%}
+        {%- assign parent_permalink = parent_permalink | append: '/' | append: url_part -%}
+        {%- assign parent_page = site.pages | where:"permalink", parent_permalink  | first -%}
+        {%- if parent_page -%}
+          {%- comment -%}Normal pages{%- endcomment -%}
+          <a class="main-menu__link main-menu__link--breadcrumb{% if page.permalink == parent_page.permalink %} main-menu__link--active{% endif %}" href="{{ parent_page.permalink }}">{{ parent_page.title }}</a>
+        {%- else -%}
+          {%- comment -%}Specifically for blog pages where the actual path to the page doesn't match the url path{%- endcomment -%}
+          <a class="main-menu__link main-menu__link--breadcrumb main-menu__link--active" href="{{ permalink }}">{{ page.title }}</a>
+          {% break %}
+        {%- endif -%}
+      {%- endfor -%}
+    {%- endunless -%}
+  </span>
+  {%- comment -%}
+  On to the real menu ... First we want to find all the pages that are children of the current page, skipping /home as usual.
+  {%- endcomment -%}
+  {%- assign search = "page.permalink contains 'TERM'"  | replace: "TERM", parent_permalink  -%}
+  {%- assign child_pages = site.pages | where_exp:"page", search | where_exp:"page", "page.permalink != '/home'" | where_exp:"page", "page.hidden != true" | sort: 'order' -%}
+  {%- comment -%}
+  Loop through all the pages we found and if we are on /home we want all the pages that are on the same level,
+  without a parent page - like /hosting, /training etc, as opposed to /hosting/seo that has the parent /hosting - and if
+  we are not on /home we want all the pages that are just one step up in the hierarchy. Since we have already filtered
+  on the parent permalink, like /hosting, we will only get direct children of /hosting this way, like /hosting/seo.
+
+  We do this by counting the parts of the url, how many / are in the url basically. For /home we want all pages whos
+  permalink has the same number of parts as /home. For any other page we want the pages thet has one more part to their
+  permalink.
+  {%- endcomment -%}
+  {% for node in child_pages %}
+    {% assign node_url_parts = node.permalink | split: '/' %}
+    {% if page.permalink == '/home' %}
+      {% assign node_url_parts_size = node_url_parts | size %}
+    {% else %}
+      {% assign node_url_parts_size = node_url_parts | size | minus: 1 %}
+    {% endif %}
+    {% if url_parts_size == node_url_parts_size %}
+      <a class="main-menu__link{% if node.permalink == page.permalink %} main-menu__link--active{% endif %}" href='{{node.permalink}}'>{{node.title}}</a>
+    {% endif %}
+  {% endfor %}
+</nav>
