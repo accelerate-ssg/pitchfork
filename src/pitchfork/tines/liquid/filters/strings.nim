@@ -1,15 +1,16 @@
-import strutils, base64, xmltree, sequtils, re
+import strutils, base64, xmltree, sequtils
+import regex
 
 import ../../../values
 
 # Compiled once. Nim's `re` is a runtime proc with no cache of its own, so
 # a pattern written inline in a filter body is compiled and studied again
 # on every call — which for these two filters cost more than the match.
-let non_handle_chars = re"[^-\w]"
+let non_handle_chars = re2"(?-u)[^-\w]"
 # strip_html drops these wholesale, contents and all, before it gets to
 # loose tags: a <script> body is not text the reader was ever meant to see.
-let html_blocks = re"(?s)<script.*?</script>|<!--.*?-->|<style.*?</style>"
-let html_tag = re"(?s)<.*?>"
+let html_blocks = re2"(?si)<script.*?</script>|<!--.*?-->|<style.*?</style>"
+let html_tag = re2"(?s)<.*?>"
 
 proc opens_entity(s: string, i: int): bool =
   ## True when s[i] == '&' starts a character reference — named ("&amp;")
@@ -357,7 +358,7 @@ create_filter:
       resultStr = value.stringVal[0..<idx] & value.stringVal[idx + substringStr.len..^1]
     result = VMValue(kind: vmString, stringVal: resultStr)
 
-# Replaces the last occurrence of a substring with another string  
+# Replaces the last occurrence of a substring with another string
 create_filter:
   proc replace_last(value: VMValue, search: VMValue, replacement: VMValue): VMValue =
     if value.kind != vmString:
